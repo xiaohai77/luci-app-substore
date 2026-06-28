@@ -94,16 +94,6 @@ return view.extend({
 		};
 		o.write = function() {};
 
-		o = s.option(form.DummyValue, '_log', _('Service Log'));
-		o.rawhtml = true;
-		o.cfgvalue = function() {
-			return '<div style="margin-top:4px">\
-				<button class="btn cbi-button" id="btn_log">%s</button>\
-				<pre id="substore_log" style="display:none;margin-top:8px;padding:8px;background:#1a1a1a;color:#eee;font-size:12px;max-height:300px;overflow-y:auto;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></pre>\
-			</div>'.format(_('View Log'));
-		};
-		o.write = function() {};
-
 		// ── 基础设置 ────────────────────────────────────────────
 		s = m.section(form.NamedSection, 'config', 'substore', _('Basic Settings'));
 		s.anonymous = true;
@@ -283,29 +273,6 @@ return view.extend({
 					}).finally(function() {
 						btnUpdateFrontend.disabled = false;
 					});
-				});
-			}
-
-			// 日志按钮
-			var btnLog = node.querySelector('#btn_log');
-			var logBox = node.querySelector('#substore_log');
-			if (btnLog && logBox) {
-				btnLog.addEventListener('click', function() {
-					if (logBox.style.display === 'none') {
-						callRunCmd('sh', ['-c', 'logread 2>/dev/null | grep -i "sub-store\\|substore" | tail -100'])
-						.then(function(res) {
-							logBox.textContent = (res.stdout || '').trim() || _('No logs found.');
-							logBox.style.display = 'block';
-							btnLog.textContent = _('Hide Log');
-						}).catch(function() {
-							logBox.textContent = _('Failed to load log.');
-							logBox.style.display = 'block';
-							btnLog.textContent = _('Hide Log');
-						});
-					} else {
-						logBox.style.display = 'none';
-						btnLog.textContent = _('View Log');
-					}
 				});
 			}
 
