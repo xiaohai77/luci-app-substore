@@ -12,10 +12,17 @@ var callServiceList = rpc.declare({
 	expect: { '': {} }
 });
 
-var callServiceRestart = rpc.declare({
-	object: 'service',
-	method: 'restart',
-	params: ['name']
+var callInitAction = rpc.declare({
+	object: 'rc',
+	method: 'init',
+	params: ['name', 'action']
+});
+
+var callRunCmd = rpc.declare({
+	object: 'file',
+	method: 'exec',
+	params: ['command', 'params'],
+	expect: { '': {} }
 });
 
 function getServiceStatus() {
@@ -26,13 +33,6 @@ function getServiceStatus() {
 			return false;
 		}
 	});
-}
-
-function downloadFile(url, dest) {
-	return L.resolveDefault(rpc.call('luci', 'exec', {
-		command: 'wget',
-		params: ['-q', '-O', dest, url]
-	}), null);
 }
 
 return view.extend({
@@ -89,7 +89,7 @@ return view.extend({
 		o.cfgvalue = function() {
 			return '<button class="btn cbi-button cbi-button-action" id="btn_update_backend">%s</button> \
 				<button class="btn cbi-button cbi-button-action" id="btn_update_frontend">%s</button> \
-				<span id="update_status" style="margin-left:8px;font-size:13px;"></span>'
+				<span id="update_status" style="margin-left:8px;font-size:13px;color:#666;"></span>'
 				.format(_('Update Backend'), _('Update Frontend'));
 		};
 		o.write = function() {};
@@ -228,11 +228,10 @@ return view.extend({
 				btnRestart.addEventListener('click', function() {
 					btnRestart.disabled = true;
 					btnRestart.textContent = _('Restarting...');
-					L.resolveDefault(rpc.call('luci', 'setInitAction', {
-						name: 'substore',
-						action: 'restart'
-					}), null).then(function() {
+					callInitAction('substore', 'restart').then(function() {
 						ui.addNotification(null, E('p', _('Sub-Store restarted.')), 'info');
+					}).catch(function() {
+						ui.addNotification(null, E('p', _('Restart failed.')), 'danger');
 					}).finally(function() {
 						btnRestart.disabled = false;
 						btnRestart.textContent = _('Restart');
@@ -247,25 +246,16 @@ return view.extend({
 				btnUpdateBackend.addEventListener('click', function() {
 					btnUpdateBackend.disabled = true;
 					updateStatus.textContent = _('Downloading backend...');
-					fetch('/cgi-bin/luci/rpc/sys', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							method: 'exec',
-							params: ['wget -q -O /usr/libexec/substore/sub-store.bundle.js https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js && echo OK || echo FAIL']
-						})
-					}).then(function(r) { return r.json(); }).then(function(res) {
-						if ((res.result || '').indexOf('OK') !== -1) {
-							updateStatus.textContent = _('Backend updated! Restarting...');
-							return L.resolveDefault(rpc.call('luci', 'setInitAction', {
-								name: 'substore', action: 'restart'
-							}), null).then(function() {
-								updateStatus.textContent = _('Backend updated and restarted.');
-							});
-						} else {
-							updateStatus.textContent = _('Backend update failed.');
-						}
+					callRunCmd('wget', ['-q', '-O', '/usr/libexec/substore/sub-store.bundle.js',
+						'https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js'
+					]).then(function() {
+						updateStatus.textContent = _('Restarting...');
+						return callInitAction('substore', 'restart');
+					}).then(function() {
+						updateStatus.style.color = '#2ecc71';
+						updateStatus.textContent = _('Backend updated and restarted.');
 					}).catch(function() {
+						updateStatus.style.color = '#e74c3c';
 						updateStatus.textContent = _('Backend update failed.');
 					}).finally(function() {
 						btnUpdateBackend.disabled = false;
@@ -279,20 +269,16 @@ return view.extend({
 				btnUpdateFrontend.addEventListener('click', function() {
 					btnUpdateFrontend.disabled = true;
 					updateStatus.textContent = _('Downloading frontend...');
-					fetch('/cgi-bin/luci/rpc/sys', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							method: 'exec',
-							params: ['wget -q -O /tmp/dist.zip https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip && rm -rf /www/sub-store/dist && unzip -q /tmp/dist.zip -d /www/sub-store && rm -f /tmp/dist.zip && echo OK || echo FAIL']
-						})
-					}).then(function(r) { return r.json(); }).then(function(res) {
-						if ((res.result || '').indexOf('OK') !== -1) {
-							updateStatus.textContent = _('Frontend updated successfully.');
-						} else {
-							updateStatus.textContent = _('Frontend update failed.');
-						}
+					callRunCmd('wget', ['-q', '-O', '/tmp/dist.zip',
+						'https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip'
+					]).then(function() {
+						updateStatus.textContent = _('Extracting...');
+						return callRunCmd('sh', ['-c', 'rm -rf /www/sub-store/dist && unzip -q /tmp/dist.zip -d /www/sub-store && rm -f /tmp/dist.zip']);
+					}).then(function() {
+						updateStatus.style.color = '#2ecc71';
+						updateStatus.textContent = _('Frontend updated successfully.');
 					}).catch(function() {
+						updateStatus.style.color = '#e74c3c';
 						updateStatus.textContent = _('Frontend update failed.');
 					}).finally(function() {
 						btnUpdateFrontend.disabled = false;
@@ -306,15 +292,9 @@ return view.extend({
 			if (btnLog && logBox) {
 				btnLog.addEventListener('click', function() {
 					if (logBox.style.display === 'none') {
-						fetch('/cgi-bin/luci/rpc/sys', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({
-								method: 'exec',
-								params: ['logread 2>/dev/null | grep -i "sub-store\\|substore" | tail -100']
-							})
-						}).then(function(r) { return r.json(); }).then(function(res) {
-							logBox.textContent = (res.result || '').trim() || _('No logs found.');
+						callRunCmd('sh', ['-c', 'logread 2>/dev/null | grep -i "sub-store\\|substore" | tail -100'])
+						.then(function(res) {
+							logBox.textContent = (res.stdout || '').trim() || _('No logs found.');
 							logBox.style.display = 'block';
 							btnLog.textContent = _('Hide Log');
 						}).catch(function() {
@@ -335,10 +315,7 @@ return view.extend({
 
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev).then(function() {
-			return L.resolveDefault(rpc.call('luci', 'setInitAction', {
-				name: 'substore',
-				action: 'restart'
-			}), null);
+			return callInitAction('substore', 'restart').catch(function() {});
 		});
 	}
 });
