@@ -28,6 +28,13 @@ function getServiceStatus() {
 	});
 }
 
+function downloadFile(url, dest) {
+	return L.resolveDefault(rpc.call('luci', 'exec', {
+		command: 'wget',
+		params: ['-q', '-O', dest, url]
+	}), null);
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -69,11 +76,21 @@ return view.extend({
 				.format(url, _('Open Sub-Store'));
 		};
 
-		o = s.option(form.DummyValue, '_restart', _('Actions'));
+		o = s.option(form.DummyValue, '_actions', _('Actions'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
 			return '<button class="btn cbi-button cbi-button-apply" id="btn_restart">%s</button>'
 				.format(_('Restart'));
+		};
+		o.write = function() {};
+
+		o = s.option(form.DummyValue, '_update', _('Update'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<button class="btn cbi-button cbi-button-action" id="btn_update_backend">%s</button> \
+				<button class="btn cbi-button cbi-button-action" id="btn_update_frontend">%s</button> \
+				<span id="update_status" style="margin-left:8px;font-size:13px;"></span>'
+				.format(_('Update Backend'), _('Update Frontend'));
 		};
 		o.write = function() {};
 
@@ -204,6 +221,8 @@ return view.extend({
 		o.placeholder = '0 4 * * 1';
 
 		return m.render().then(function(node) {
+
+			// 重启按钮
 			var btnRestart = node.querySelector('#btn_restart');
 			if (btnRestart) {
 				btnRestart.addEventListener('click', function() {
@@ -221,12 +240,72 @@ return view.extend({
 				});
 			}
 
+			// 更新后端按钮
+			var btnUpdateBackend = node.querySelector('#btn_update_backend');
+			var updateStatus = node.querySelector('#update_status');
+			if (btnUpdateBackend) {
+				btnUpdateBackend.addEventListener('click', function() {
+					btnUpdateBackend.disabled = true;
+					updateStatus.textContent = _('Downloading backend...');
+					fetch('/cgi-bin/luci/rpc/sys', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							method: 'exec',
+							params: ['wget -q -O /usr/libexec/substore/sub-store.bundle.js https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store.bundle.js && echo OK || echo FAIL']
+						})
+					}).then(function(r) { return r.json(); }).then(function(res) {
+						if ((res.result || '').indexOf('OK') !== -1) {
+							updateStatus.textContent = _('Backend updated! Restarting...');
+							return L.resolveDefault(rpc.call('luci', 'setInitAction', {
+								name: 'substore', action: 'restart'
+							}), null).then(function() {
+								updateStatus.textContent = _('Backend updated and restarted.');
+							});
+						} else {
+							updateStatus.textContent = _('Backend update failed.');
+						}
+					}).catch(function() {
+						updateStatus.textContent = _('Backend update failed.');
+					}).finally(function() {
+						btnUpdateBackend.disabled = false;
+					});
+				});
+			}
+
+			// 更新前端按钮
+			var btnUpdateFrontend = node.querySelector('#btn_update_frontend');
+			if (btnUpdateFrontend) {
+				btnUpdateFrontend.addEventListener('click', function() {
+					btnUpdateFrontend.disabled = true;
+					updateStatus.textContent = _('Downloading frontend...');
+					fetch('/cgi-bin/luci/rpc/sys', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							method: 'exec',
+							params: ['wget -q -O /tmp/dist.zip https://github.com/sub-store-org/Sub-Store-Front-End/releases/latest/download/dist.zip && rm -rf /www/sub-store/dist && unzip -q /tmp/dist.zip -d /www/sub-store && rm -f /tmp/dist.zip && echo OK || echo FAIL']
+						})
+					}).then(function(r) { return r.json(); }).then(function(res) {
+						if ((res.result || '').indexOf('OK') !== -1) {
+							updateStatus.textContent = _('Frontend updated successfully.');
+						} else {
+							updateStatus.textContent = _('Frontend update failed.');
+						}
+					}).catch(function() {
+						updateStatus.textContent = _('Frontend update failed.');
+					}).finally(function() {
+						btnUpdateFrontend.disabled = false;
+					});
+				});
+			}
+
+			// 日志按钮
 			var btnLog = node.querySelector('#btn_log');
 			var logBox = node.querySelector('#substore_log');
 			if (btnLog && logBox) {
 				btnLog.addEventListener('click', function() {
 					if (logBox.style.display === 'none') {
-						L.resolveDefault(rpc.call('luci', 'getInitList', { name: 'substore' }), null);
 						fetch('/cgi-bin/luci/rpc/sys', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
