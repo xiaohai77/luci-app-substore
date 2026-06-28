@@ -12,6 +12,24 @@ var callServiceList = rpc.declare({
 	expect: { '': {} }
 });
 
+var callServiceStart = rpc.declare({
+	object: 'service',
+	method: 'start',
+	params: ['name']
+});
+
+var callServiceStop = rpc.declare({
+	object: 'service',
+	method: 'stop',
+	params: ['name']
+});
+
+var callServiceRestart = rpc.declare({
+	object: 'service',
+	method: 'restart',
+	params: ['name']
+});
+
 function getServiceStatus() {
 	return callServiceList('substore').then(function(res) {
 		try {
@@ -32,7 +50,6 @@ return view.extend({
 
 	render: function(data) {
 		var isRunning = data[1];
-
 		var m, s, o;
 
 		m = new form.Map('substore', _('Sub-Store'),
@@ -65,6 +82,27 @@ return view.extend({
 				.format(url, _('Open Sub-Store'));
 		};
 
+		// 重启按钮
+		o = s.option(form.DummyValue, '_restart', _('Actions'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<button class="btn cbi-button cbi-button-apply" id="btn_restart">%s</button> \
+				<button class="btn cbi-button cbi-button-reset" id="btn_stop">%s</button>'
+				.format(_('Restart'), _('Stop'));
+		};
+		o.write = function() {};
+
+		// 日志查看
+		o = s.option(form.DummyValue, '_log', _('Service Log'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<div style="margin-top:4px"> \
+				<button class="btn cbi-button" id="btn_log">%s</button> \
+				<pre id="substore_log" style="display:none;margin-top:8px;padding:8px;background:#1a1a1a;color:#eee;font-size:12px;max-height:300px;overflow-y:auto;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></pre> \
+			</div>'.format(_('View Log'));
+		};
+		o.write = function() {};
+
 		// ── 基础设置 ────────────────────────────────────────────
 		s = m.section(form.NamedSection, 'config', 'substore', _('Basic Settings'));
 		s.anonymous = true;
@@ -84,11 +122,11 @@ return view.extend({
 		s = m.section(form.NamedSection, 'config', 'substore', _('Port & Network'));
 		s.anonymous = true;
 
-		o = s.option(form.Value, 'frontend_port', _('Frontend Port'));
+		o = s.option(form.Value, 'frontend_port', _('Service Port'), _('Port for both frontend and backend (merge mode)'));
 		o.default = '3001';
 		o.datatype = 'port';
 
-		o = s.option(form.Value, 'frontend_host', _('Frontend Listen Address'));
+		o = s.option(form.Value, 'frontend_host', _('Listen Address'));
 		o.default = '0.0.0.0';
 		o.placeholder = '0.0.0.0';
 
@@ -96,24 +134,8 @@ return view.extend({
 		o.default = '/sub-store-api';
 		o.placeholder = '/sub-store-api';
 
-		o = s.option(form.Flag, 'backend_merge', _('Merge Frontend & Backend'),
-			_('Serve both frontend and backend on the same port (frontend port)'));
-		o.default = '1';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'backend_api_port', _('Backend API Port'),
-			_('Only used when merge is disabled'));
-		o.default = '3000';
-		o.datatype = 'port';
-		o.depends('backend_merge', '0');
-
-		o = s.option(form.Value, 'backend_api_host', _('Backend API Listen Address'),
-			_('Should never be exposed publicly. Only used when merge is disabled'));
-		o.default = '127.0.0.1';
-		o.depends('backend_merge', '0');
-
 		o = s.option(form.Value, 'http_meta_port', _('HTTP-META Port'),
-			_('Port for HTTP-META (built-in proxy test engine). Avoid conflict with other services'));
+			_('Port for HTTP-META engine. Avoid conflict with other services'));
 		o.default = '9876';
 		o.datatype = 'port';
 
@@ -122,7 +144,7 @@ return view.extend({
 		s.anonymous = true;
 
 		o = s.option(form.Value, 'backend_sync_cron', _('Subscription Sync Cron'),
-			_('Cron expression to push subscriptions to Gist. e.g. 55 23 * * * (daily at 23:55)'));
+			_('Cron expression to push subscriptions to Gist. e.g. 55 23 * * *'));
 		o.placeholder = '55 23 * * *';
 
 		o = s.option(form.Value, 'backend_upload_cron', _('Backup Upload Cron'),
@@ -197,21 +219,82 @@ return view.extend({
 		o = s.option(form.Value, 'mmdb_cron', _('MMDB Update Cron'));
 		o.placeholder = '0 4 * * 1';
 
-		return m.render();
+		return m.render().then(function(node) {
+			// 重启按钮事件
+			var btnRestart = node.querySelector('#btn_restart');
+			if (btnRestart) {
+				btnRestart.addEventListener('click', function() {
+					btnRestart.disabled = true;
+					btnRestart.textContent = _('Restarting...');
+					callServiceRestart('substore').then(function() {
+						ui.addNotification(null, E('p', _('Sub-Store restarted successfully.')), 'info');
+						btnRestart.disabled = false;
+						btnRestart.textContent = _('Restart');
+					}).catch(function() {
+						ui.addNotification(null, E('p', _('Restart failed.')), 'danger');
+						btnRestart.disabled = false;
+						btnRestart.textContent = _('Restart');
+					});
+				});
+			}
+
+			// 停止按钮事件
+			var btnStop = node.querySelector('#btn_stop');
+			if (btnStop) {
+				btnStop.addEventListener('click', function() {
+					btnStop.disabled = true;
+					callServiceStop('substore').then(function() {
+						ui.addNotification(null, E('p', _('Sub-Store stopped.')), 'info');
+						btnStop.disabled = false;
+					}).catch(function() {
+						btnStop.disabled = false;
+					});
+				});
+			}
+
+			// 日志按钮事件
+			var btnLog = node.querySelector('#btn_log');
+			var logBox = node.querySelector('#substore_log');
+			if (btnLog && logBox) {
+				btnLog.addEventListener('click', function() {
+					if (logBox.style.display === 'none') {
+						L.Request.get('/cgi-bin/luci/admin/system/log').then(function() {}).catch(function() {});
+						fetch('/cgi-bin/luci/', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+						}).catch(function() {});
+
+						rpc.call('file', 'exec', {
+							command: 'logread',
+							params: ['-e', 'node']
+						}).then(function(res) {
+							var lines = (res.stdout || '').split('\n');
+							var filtered = lines.filter(function(l) {
+								return l.indexOf('sub-store') !== -1 || l.indexOf('substore') !== -1;
+							}).slice(-100).join('\n');
+							logBox.textContent = filtered || _('No logs found.');
+							logBox.style.display = 'block';
+							btnLog.textContent = _('Hide Log');
+						}).catch(function() {
+							logBox.textContent = _('Failed to load log.');
+							logBox.style.display = 'block';
+						});
+					} else {
+						logBox.style.display = 'none';
+						btnLog.textContent = _('View Log');
+					}
+				});
+			}
+
+			return node;
+		});
 	},
 
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev).then(function() {
-			return rpc.call('rc', 'init', {
-				name: 'substore',
-				action: 'restart'
-			}).catch(function() {
-				return L.resolveDefault(
-					L.Request.get('/cgi-bin/luci/admin/system/startup').then(function() {
-						return Promise.resolve();
-					})
-				);
-			});
+			return callServiceRestart('substore').catch(function() {});
+		}).then(function() {
+			ui.addNotification(null, E('p', _('Settings saved and Sub-Store restarted.')), 'info');
 		});
 	}
 });
