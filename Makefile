@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI support for Sub-Store (Subscription Manager)
-LUCI_DEPENDS:=+node
+LUCI_DEPENDS:=+node +unzip
 LUCI_PKGARCH:=all
 
 PKG_NAME:=luci-app-substore
@@ -19,10 +19,13 @@ define Package/luci-app-substore/install
 	$(INSTALL_DATA) ./root/etc/config/substore $(1)/etc/config/substore
 	$(INSTALL_DIR) $(1)/usr/libexec/substore
 	$(INSTALL_BIN) ./root/usr/libexec/substore/postinstall.sh $(1)/usr/libexec/substore/postinstall.sh
+	$(INSTALL_BIN) ./root/usr/libexec/substore/sub-store.bundle.js $(1)/usr/libexec/substore/sub-store.bundle.js
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
 	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/luci-app-substore.json $(1)/usr/share/luci/menu.d/luci-app-substore.json
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/substore
 	$(INSTALL_DATA) ./root/www/luci-static/resources/view/substore/main.js $(1)/www/luci-static/resources/view/substore/main.js
+	$(INSTALL_DIR) $(1)/www/sub-store
+	cp -r ./root/www/sub-store/dist $(1)/www/sub-store/
 endef
 
 define Package/luci-app-substore/postinst
