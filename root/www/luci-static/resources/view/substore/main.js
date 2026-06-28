@@ -12,18 +12,6 @@ var callServiceList = rpc.declare({
 	expect: { '': {} }
 });
 
-var callServiceStart = rpc.declare({
-	object: 'service',
-	method: 'start',
-	params: ['name']
-});
-
-var callServiceStop = rpc.declare({
-	object: 'service',
-	method: 'stop',
-	params: ['name']
-});
-
 var callServiceRestart = rpc.declare({
 	object: 'service',
 	method: 'restart',
@@ -67,7 +55,6 @@ return view.extend({
 			return '<span style="color:%s;font-weight:bold;">● %s</span>'.format(color, text);
 		};
 
-		// 打开Web面板按钮
 		o = s.option(form.DummyValue, '_open', _('Web Panel'));
 		o.rawhtml = true;
 		o.cfgvalue = function(section_id) {
@@ -82,23 +69,20 @@ return view.extend({
 				.format(url, _('Open Sub-Store'));
 		};
 
-		// 重启按钮
 		o = s.option(form.DummyValue, '_restart', _('Actions'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<button class="btn cbi-button cbi-button-apply" id="btn_restart">%s</button> \
-				<button class="btn cbi-button cbi-button-reset" id="btn_stop">%s</button>'
-				.format(_('Restart'), _('Stop'));
+			return '<button class="btn cbi-button cbi-button-apply" id="btn_restart">%s</button>'
+				.format(_('Restart'));
 		};
 		o.write = function() {};
 
-		// 日志查看
 		o = s.option(form.DummyValue, '_log', _('Service Log'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<div style="margin-top:4px"> \
-				<button class="btn cbi-button" id="btn_log">%s</button> \
-				<pre id="substore_log" style="display:none;margin-top:8px;padding:8px;background:#1a1a1a;color:#eee;font-size:12px;max-height:300px;overflow-y:auto;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></pre> \
+			return '<div style="margin-top:4px">\
+				<button class="btn cbi-button" id="btn_log">%s</button>\
+				<pre id="substore_log" style="display:none;margin-top:8px;padding:8px;background:#1a1a1a;color:#eee;font-size:12px;max-height:300px;overflow-y:auto;border-radius:4px;white-space:pre-wrap;word-break:break-all;"></pre>\
 			</div>'.format(_('View Log'));
 		};
 		o.write = function() {};
@@ -122,7 +106,7 @@ return view.extend({
 		s = m.section(form.NamedSection, 'config', 'substore', _('Port & Network'));
 		s.anonymous = true;
 
-		o = s.option(form.Value, 'frontend_port', _('Service Port'), _('Port for both frontend and backend (merge mode)'));
+		o = s.option(form.Value, 'frontend_port', _('Service Port'), _('Port for both frontend and backend'));
 		o.default = '3001';
 		o.datatype = 'port';
 
@@ -220,64 +204,44 @@ return view.extend({
 		o.placeholder = '0 4 * * 1';
 
 		return m.render().then(function(node) {
-			// 重启按钮事件
 			var btnRestart = node.querySelector('#btn_restart');
 			if (btnRestart) {
 				btnRestart.addEventListener('click', function() {
 					btnRestart.disabled = true;
 					btnRestart.textContent = _('Restarting...');
-					callServiceRestart('substore').then(function() {
-						ui.addNotification(null, E('p', _('Sub-Store restarted successfully.')), 'info');
-						btnRestart.disabled = false;
-						btnRestart.textContent = _('Restart');
-					}).catch(function() {
-						ui.addNotification(null, E('p', _('Restart failed.')), 'danger');
+					L.resolveDefault(rpc.call('luci', 'setInitAction', {
+						name: 'substore',
+						action: 'restart'
+					}), null).then(function() {
+						ui.addNotification(null, E('p', _('Sub-Store restarted.')), 'info');
+					}).finally(function() {
 						btnRestart.disabled = false;
 						btnRestart.textContent = _('Restart');
 					});
 				});
 			}
 
-			// 停止按钮事件
-			var btnStop = node.querySelector('#btn_stop');
-			if (btnStop) {
-				btnStop.addEventListener('click', function() {
-					btnStop.disabled = true;
-					callServiceStop('substore').then(function() {
-						ui.addNotification(null, E('p', _('Sub-Store stopped.')), 'info');
-						btnStop.disabled = false;
-					}).catch(function() {
-						btnStop.disabled = false;
-					});
-				});
-			}
-
-			// 日志按钮事件
 			var btnLog = node.querySelector('#btn_log');
 			var logBox = node.querySelector('#substore_log');
 			if (btnLog && logBox) {
 				btnLog.addEventListener('click', function() {
 					if (logBox.style.display === 'none') {
-						L.Request.get('/cgi-bin/luci/admin/system/log').then(function() {}).catch(function() {});
-						fetch('/cgi-bin/luci/', {
+						L.resolveDefault(rpc.call('luci', 'getInitList', { name: 'substore' }), null);
+						fetch('/cgi-bin/luci/rpc/sys', {
 							method: 'POST',
-							headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-						}).catch(function() {});
-
-						rpc.call('file', 'exec', {
-							command: 'logread',
-							params: ['-e', 'node']
-						}).then(function(res) {
-							var lines = (res.stdout || '').split('\n');
-							var filtered = lines.filter(function(l) {
-								return l.indexOf('sub-store') !== -1 || l.indexOf('substore') !== -1;
-							}).slice(-100).join('\n');
-							logBox.textContent = filtered || _('No logs found.');
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								method: 'exec',
+								params: ['logread 2>/dev/null | grep -i "sub-store\\|substore" | tail -100']
+							})
+						}).then(function(r) { return r.json(); }).then(function(res) {
+							logBox.textContent = (res.result || '').trim() || _('No logs found.');
 							logBox.style.display = 'block';
 							btnLog.textContent = _('Hide Log');
 						}).catch(function() {
 							logBox.textContent = _('Failed to load log.');
 							logBox.style.display = 'block';
+							btnLog.textContent = _('Hide Log');
 						});
 					} else {
 						logBox.style.display = 'none';
@@ -292,9 +256,10 @@ return view.extend({
 
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev).then(function() {
-			return callServiceRestart('substore').catch(function() {});
-		}).then(function() {
-			ui.addNotification(null, E('p', _('Settings saved and Sub-Store restarted.')), 'info');
+			return L.resolveDefault(rpc.call('luci', 'setInitAction', {
+				name: 'substore',
+				action: 'restart'
+			}), null);
 		});
 	}
 });
