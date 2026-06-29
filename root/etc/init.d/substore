@@ -21,7 +21,7 @@ start_service() {
 	mkdir -p "$data_dir"
 
 	local frontend_port=$(uci_get frontend_port 3001)
-	local frontend_host=$(uci_get frontend_host 0.0.0.0)
+	local frontend_host=$(uci_get frontend_host ::)
 	local backend_merge=$(uci_get backend_merge 1)
 	local frontend_backend_path=$(uci_get frontend_backend_path /sub-store-api)
 	local backend_sync_cron=$(uci_get backend_sync_cron "")
