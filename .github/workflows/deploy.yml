@@ -145,6 +145,23 @@ jobs:
           EOF
           cat site/index.html
 
+      - name: Generate no-cache headers
+        run: |
+          cat > site/_headers << 'EOF'
+          /openwrt-25.12/*
+            Cache-Control: no-cache, no-store, must-revalidate
+
+          /openwrt-23.05/*
+            Cache-Control: no-cache, no-store, must-revalidate
+
+          /*.pem
+            Cache-Control: no-cache, no-store, must-revalidate
+
+          /*.pub
+            Cache-Control: no-cache, no-store, must-revalidate
+          EOF
+          cat site/_headers
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
