@@ -72,6 +72,7 @@ jobs:
           cd "$REPO_DIR"
           "$GITHUB_WORKSPACE/$APK_BIN" mkndx \
             --keys-dir /tmp/keys \
+            --allow-untrusted \
             --sign /tmp/private-key.pem \
             --output packages.adb \
             *.apk
