@@ -49,6 +49,11 @@ jobs:
           cp -r src openwrt-sdk/package/luci-app-substore
           ls openwrt-sdk/package/luci-app-substore/
 
+      - name: Set package release version
+        run: |
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ github.run_number }}/" openwrt-sdk/package/luci-app-substore/Makefile
+          grep PKG_RELEASE openwrt-sdk/package/luci-app-substore/Makefile
+
       - name: Build
         run: |
           cd openwrt-sdk
