@@ -16,7 +16,7 @@ if [ -x /usr/bin/apk ]; then
 
     echo "添加软件源..."
     mkdir -p /etc/apk/repositories.d
-    echo "$REPO_URL/openwrt-25.12/all" > /etc/apk/repositories.d/substore.list
+    echo "$REPO_URL/openwrt-25.12/all/packages.adb" > /etc/apk/repositories.d/substore.list
 
     echo "更新索引..."
     apk update
