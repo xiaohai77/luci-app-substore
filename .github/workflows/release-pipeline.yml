@@ -49,8 +49,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run build-ipk.yml
-          gh workflow run build-apk.yml
+          gh workflow run substore-ipk.yml
+          gh workflow run substore-apk.yml
           sleep 15
 
       - name: Wait for both builds to finish
