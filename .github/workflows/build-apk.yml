@@ -58,7 +58,14 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p output
-          find openwrt-sdk/bin -name "luci-app-substore*.apk" -exec cp {} output/ \;
+
+          VERSION=$(grep "^PKG_VERSION:=" openwrt-sdk/package/luci-app-substore/Makefile | cut -d= -f2)
+          RELEASE=$(grep "^PKG_RELEASE:=" openwrt-sdk/package/luci-app-substore/Makefile | cut -d= -f2)
+
+          find openwrt-sdk/bin -name "luci-app-substore*.apk" | while read file; do
+            cp "$file" "output/luci-app-substore-${VERSION}.${RELEASE}.apk"
+          done
+
           ls -lh output/
 
       - name: Upload artifact
