@@ -2,7 +2,7 @@ name: release-pipeline
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # 每2小时检查一次
+    - cron: '0 */6 * * *'   # 每2小时检查一次
   workflow_dispatch:
 
 jobs:
