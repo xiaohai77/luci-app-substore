@@ -11,7 +11,7 @@ echo "=== luci-app-substore 一键安装 ==="
 if [ -x /usr/bin/apk ]; then
     echo "检测到 apk 包管理器 (OpenWrt 25.12+)"
 
-    wget -q -O /etc/apk/keys/substore-pub.pem "$REPO_URL/substore-pub.pem"
+    wget -q -O /etc/apk/keys/substore-apk.pem "$REPO_URL/substore-apk.pem"
 
     echo "添加软件源..."
     mkdir -p /etc/apk/repositories.d
@@ -28,9 +28,9 @@ if [ -x /usr/bin/apk ]; then
 elif [ -x /bin/opkg ]; then
     echo "检测到 opkg 包管理器 (OpenWrt 24.10 及更早)"
 
-    wget -q -O /tmp/ipk-sign.pub "$REPO_URL/ipk-sign.pub"
-    opkg-key add /tmp/ipk-sign.pub
-    rm -f /tmp/ipk-sign.pub
+    wget -q -O /tmp/substore-ipk.pub "$REPO_URL/substore-ipk.pub"
+    opkg-key add /tmp/substore-ipk.pub
+    rm -f /tmp/substore-ipk.pub
 
     echo "添加软件源..."
     if ! grep -q "substore" /etc/opkg/customfeeds.conf 2>/dev/null; then
