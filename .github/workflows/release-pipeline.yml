@@ -2,8 +2,8 @@ name: release-pipeline
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 每天 UTC 2点(北京时间10点)自动检查一次
-  workflow_dispatch:        # 也支持手动点一下立刻检查
+    - cron: '0 */2 * * *'   # 每2小时检查一次
+  workflow_dispatch:
 
 jobs:
   check-and-release:
@@ -12,28 +12,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check upstream Sub-Store version
+      - name: Check upstream versions (backend + frontend)
         id: check
         run: |
-          LATEST=$(curl -s https://api.github.com/repos/sub-store-org/Sub-Store/releases/latest | jq -r .tag_name)
-          CACHED=$(cat .last-substore-version 2>/dev/null || echo "none")
-          echo "上游最新版本: $LATEST"
-          echo "上次记录版本: $CACHED"
-          if [ "$LATEST" != "$CACHED" ]; then
+          BACKEND_LATEST=$(curl -s https://api.github.com/repos/sub-store-org/Sub-Store/releases/latest | jq -r .tag_name)
+          FRONTEND_LATEST=$(curl -s https://api.github.com/repos/sub-store-org/Sub-Store-Front-End/releases/latest | jq -r .tag_name)
+
+          BACKEND_CACHED=$(cat .last-substore-backend-version 2>/dev/null || echo "none")
+          FRONTEND_CACHED=$(cat .last-substore-frontend-version 2>/dev/null || echo "none")
+
+          echo "后端 上游最新: $BACKEND_LATEST / 上次记录: $BACKEND_CACHED"
+          echo "前端 上游最新: $FRONTEND_LATEST / 上次记录: $FRONTEND_CACHED"
+
+          if [ "$BACKEND_LATEST" != "$BACKEND_CACHED" ] || [ "$FRONTEND_LATEST" != "$FRONTEND_CACHED" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
-          echo "latest=$LATEST" >> $GITHUB_OUTPUT
 
-      - name: Update cached version file
+          echo "backend_latest=$BACKEND_LATEST" >> $GITHUB_OUTPUT
+          echo "frontend_latest=$FRONTEND_LATEST" >> $GITHUB_OUTPUT
+
+      - name: Update cached version files
         if: steps.check.outputs.changed == 'true'
         run: |
-          echo "${{ steps.check.outputs.latest }}" > .last-substore-version
+          echo "${{ steps.check.outputs.backend_latest }}" > .last-substore-backend-version
+          echo "${{ steps.check.outputs.frontend_latest }}" > .last-substore-frontend-version
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add .last-substore-version
-          git commit -m "chore: bump cached Sub-Store version to ${{ steps.check.outputs.latest }}"
+          git add .last-substore-backend-version .last-substore-frontend-version
+          git commit -m "chore: bump cached Sub-Store versions (backend ${{ steps.check.outputs.backend_latest }}, frontend ${{ steps.check.outputs.frontend_latest }})"
           git push
 
       - name: Trigger IPK and APK builds
