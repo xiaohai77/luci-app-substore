@@ -1,0 +1,155 @@
+name: deploy-to-cloudflare
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 wget
+
+      - name: Find latest IPK release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/${{ github.repository }}/releases --jq '[.[] | select(.tag_name | endswith("-apk") | not)] | sort_by(.created_at) | last | .tag_name')
+          echo "IPK_TAG=$TAG" >> $GITHUB_ENV
+          echo "IPK tag: $TAG"
+
+      - name: Find latest APK release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/${{ github.repository }}/releases --jq '[.[] | select(.tag_name | endswith("-apk"))] | sort_by(.created_at) | last | .tag_name')
+          echo "APK_TAG=$TAG" >> $GITHUB_ENV
+          echo "APK tag: $TAG"
+
+      - name: Download IPK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ipk-download
+          gh release download "$IPK_TAG" --pattern "*.ipk" --dir ipk-download --repo ${{ github.repository }}
+
+      - name: Download APK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p apk-download
+          gh release download "$APK_TAG" --pattern "*.apk" --dir apk-download --repo ${{ github.repository }}
+
+      - name: Download OpenWrt SDK (for usign + apk host tools)
+        run: |
+          wget -q "https://downloads.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz" -O sdk-ipk.tar.xz
+          tar -xf sdk-ipk.tar.xz
+          mv openwrt-sdk-* sdk-ipk
+
+          sudo apt-get install -y zstd
+          wget -q "https://downloads.openwrt.org/releases/25.12.4/targets/x86/64/openwrt-sdk-25.12.4-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst" -O sdk-apk.tar.zst
+          tar --zstd -xf sdk-apk.tar.zst
+          mv openwrt-sdk-* sdk-apk
+
+      - name: Build signed IPK index
+        run: |
+          set -e
+          sudo tee /usr/local/bin/sha256 > /dev/null << 'EOF'
+          #!/bin/bash
+          sha256sum "$1" | awk '{print $1}'
+          EOF
+          sudo chmod +x /usr/local/bin/sha256
+
+          echo "${{ secrets.IPK_SIGN_KEY }}" > /tmp/ipk-sign.key
+          USIGN_BIN=$(find sdk-ipk -type f -name usign -path "*/host/bin/*" | head -n1)
+
+          REPO_DIR=site/openwrt-23.05/x86_64
+          mkdir -p "$REPO_DIR"
+          cp ipk-download/*.ipk "$REPO_DIR/"
+          cd "$REPO_DIR"
+          "$GITHUB_WORKSPACE/sdk-ipk/scripts/ipkg-make-index.sh" . > Packages
+          gzip -kf Packages
+          "$GITHUB_WORKSPACE/$USIGN_BIN" -S -m Packages -s /tmp/ipk-sign.key -x Packages.sig
+          cd "$GITHUB_WORKSPACE"
+          shred -u /tmp/ipk-sign.key 2>/dev/null || rm -f /tmp/ipk-sign.key
+
+      - name: Build signed APK index
+        run: |
+          set -e
+          echo "${{ secrets.APK_SIGN_KEY }}" > /tmp/apk-sign.key
+          openssl ec -in /tmp/apk-sign.key -pubout -out site/substore-pub.pem
+
+          APK_BIN=$(find sdk-apk/staging_dir -type f -name apk -path "*/host/bin/*" | head -n1)
+
+          REPO_DIR=site/openwrt-25.12/aarch64_cortex-a53
+          mkdir -p "$REPO_DIR"
+          cp apk-download/*.apk "$REPO_DIR/"
+
+          mkdir -p /tmp/keys
+          cp site/substore-pub.pem /tmp/keys/
+
+          cd "$REPO_DIR"
+          "$GITHUB_WORKSPACE/$APK_BIN" mkndx \
+            --keys-dir /tmp/keys \
+            --allow-untrusted \
+            --sign /tmp/apk-sign.key \
+            --output packages.adb \
+            *.apk
+          cd "$GITHUB_WORKSPACE"
+          shred -u /tmp/apk-sign.key 2>/dev/null || rm -f /tmp/apk-sign.key
+
+      - name: Copy IPK public key and install.sh
+        run: |
+          cp keys/ipk-sign.pub site/ipk-sign.pub
+          cp scripts/install.sh site/install.sh
+
+      - name: Generate index.html (Nikki-style directory tree)
+        run: |
+          python3 << 'EOF'
+          import os
+
+          root = "site"
+          lines = []
+          lines.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
+          lines.append("<title>luci-app-substore Feed</title>")
+          lines.append("<style>body{font-family:monospace;background:#1e1e1e;color:#ddd;padding:20px;}")
+          lines.append("a{color:#7ec9ff;text-decoration:none;} a:hover{text-decoration:underline;}")
+          lines.append("h1{color:#fff;} .dir{color:#f0c674;}</style></head><body>")
+          lines.append("<h1>luci-app-substore Feed</h1><pre>")
+
+          def walk(path, prefix=""):
+              entries = sorted(os.listdir(path))
+              entries = [e for e in entries if e != "index.html"]
+              for i, name in enumerate(entries):
+                  full = os.path.join(path, name)
+                  connector = "└── " if i == len(entries) - 1 else "├── "
+                  rel = os.path.relpath(full, root)
+                  if os.path.isdir(full):
+                      lines.append(f"{prefix}{connector}<span class='dir'>{name}/</span>")
+                      extension = "    " if i == len(entries) - 1 else "│   "
+                      walk(full, prefix + extension)
+                  else:
+                      lines.append(f"{prefix}{connector}<a href='/{rel}'>{name}</a>")
+
+          walk(root)
+          lines.append("</pre></body></html>")
+
+          with open(os.path.join(root, "index.html"), "w") as f:
+              f.write("\n".join(lines))
+          EOF
+          cat site/index.html
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          projectName: substore-openwrt
+          directory: site
+          branch: main
