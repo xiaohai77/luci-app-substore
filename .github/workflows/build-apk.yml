@@ -13,17 +13,14 @@ jobs:
         with:
           path: src
 
-      # ==========================================
-      # 🤖 ✨ 这一步是新加的：自动递增版本号
-      # ==========================================
-      - name: 🤖 自动让版本号随着编译次数递增
+      - name: Auto increment package release
         run: |
           if [ -f src/Makefile ]; then
             sed -i 's/PKG_RELEASE:=.*/PKG_RELEASE:=${{ github.run_number }}/g' src/Makefile
-            echo "=== ✅ 成功将 PKG_RELEASE 修改为: ${{ github.run_number }} ==="
+            echo "Successfully updated PKG_RELEASE to: ${{ github.run_number }}"
             grep "PKG_RELEASE:=" src/Makefile
           else
-            echo "⚠️ 警告：未在 src/ 根目录下找到 Makefile，请检查路径！"
+            echo "Warning: Makefile not found in src/ directory!"
           fi
 
       - name: Install dependencies
@@ -55,7 +52,6 @@ jobs:
 
       - name: Copy package
         run: |
-          # 此时拷贝过去的 src 已经是被动态修改过版本号的纯正源码包了
           cp -r src openwrt-sdk/package/luci-app-substore
 
       - name: Build
