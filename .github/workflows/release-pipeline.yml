@@ -1,0 +1,73 @@
+name: release-pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 2点(北京时间10点)自动检查一次
+  workflow_dispatch:        # 也支持手动点一下立刻检查
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check upstream Sub-Store version
+        id: check
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/sub-store-org/Sub-Store/releases/latest | jq -r .tag_name)
+          CACHED=$(cat .last-substore-version 2>/dev/null || echo "none")
+          echo "上游最新版本: $LATEST"
+          echo "上次记录版本: $CACHED"
+          if [ "$LATEST" != "$CACHED" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+
+      - name: Update cached version file
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.check.outputs.latest }}" > .last-substore-version
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .last-substore-version
+          git commit -m "chore: bump cached Sub-Store version to ${{ steps.check.outputs.latest }}"
+          git push
+
+      - name: Trigger IPK and APK builds
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build-ipk.yml
+          gh workflow run build-apk.yml
+          sleep 15
+
+      - name: Wait for both builds to finish
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in $(seq 1 60); do
+            IPK_STATUS=$(gh run list --workflow=build-ipk.yml --limit 1 --json status,conclusion --jq '.[0]')
+            APK_STATUS=$(gh run list --workflow=build-apk.yml --limit 1 --json status,conclusion --jq '.[0]')
+            IPK_DONE=$(echo "$IPK_STATUS" | jq -r '.status == "completed"')
+            APK_DONE=$(echo "$APK_STATUS" | jq -r '.status == "completed"')
+            echo "IPK: $IPK_STATUS"
+            echo "APK: $APK_STATUS"
+            if [ "$IPK_DONE" = "true" ] && [ "$APK_DONE" = "true" ]; then
+              echo "两个编译都完成了"
+              break
+            fi
+            echo "还在编译中，等待30秒..."
+            sleep 30
+          done
+
+      - name: Trigger deploy to Cloudflare
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run deploy.yml
