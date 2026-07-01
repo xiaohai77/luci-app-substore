@@ -1,0 +1,52 @@
+#!/bin/sh
+# luci-app-substore 一键安装脚本
+# 用法: wget -O - https://substore-openwrt.pages.dev/install.sh | ash
+
+set -e
+
+REPO_URL="https://substore-openwrt.pages.dev"
+
+echo "=== luci-app-substore 一键安装 ==="
+
+if [ -x /usr/bin/apk ]; then
+    echo "检测到 apk 包管理器 (OpenWrt 25.12+)"
+
+    echo "下载公钥..."
+    wget -q -O /etc/apk/keys/substore-pub.pem "$REPO_URL/substore-pub.pem"
+
+    echo "添加软件源..."
+    mkdir -p /etc/apk/repositories.d
+    echo "$REPO_URL/openwrt-25.12/aarch64_cortex-a53" > /etc/apk/repositories.d/substore.list
+
+    echo "更新索引..."
+    apk update
+
+    echo "安装 luci-app-substore..."
+    apk add luci-app-substore
+
+elif [ -x /bin/opkg ]; then
+    echo "检测到 opkg 包管理器 (OpenWrt 24.10 及更早)"
+
+    echo "下载公钥..."
+    wget -q -O /tmp/ipk-sign.pub "$REPO_URL/ipk-sign.pub"
+    opkg-key add /tmp/ipk-sign.pub
+    rm -f /tmp/ipk-sign.pub
+
+    echo "添加软件源..."
+    if ! grep -q "substore" /etc/opkg/customfeeds.conf 2>/dev/null; then
+        echo "src/gz substore $REPO_URL/openwrt-23.05/x86_64" >> /etc/opkg/customfeeds.conf
+    fi
+
+    echo "更新索引..."
+    opkg update
+
+    echo "安装 luci-app-substore..."
+    opkg install luci-app-substore
+
+else
+    echo "错误: 未检测到 opkg 或 apk，不支持的系统" >&2
+    exit 1
+fi
+
+echo "=== 安装完成 ==="
+echo "请在 LuCI 中查看 luci-app-substore"
